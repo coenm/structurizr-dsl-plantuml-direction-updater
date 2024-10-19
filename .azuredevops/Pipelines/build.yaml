@@ -127,16 +127,6 @@ stages:
 
         - template: Templates/publish-code-analysis.yaml
 
-        # - task: DotNetCoreCLI@2
-        #   displayName: Dotnet Publish
-        #   inputs:
-        #     command: publish
-        #     arguments: "--configuration $(buildConfiguration)"
-        #     projects: "**/StructurizrDslPlantumlDirectionUpdater.csproj"
-        #     publishWebProjects: false
-        #     modifyOutputPath: false
-        #     zipAfterPublish: false
-
         - task: DotNetCoreCLI@2
           displayName: 'DotNet Pack'
           inputs:
@@ -159,9 +149,7 @@ stages:
           inputs:
             PathtoPublish: "$(Build.ArtifactStagingDirectory)\nuget"
             # PathtoPublish: "_output"
-            ArtifactName: nuget            
-
-        # - template: Templates/create-installer.yaml
+            ArtifactName: packages            
 
         - template: Templates/publish-release-dependencies.yaml       
     

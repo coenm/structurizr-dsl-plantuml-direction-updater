@@ -4,7 +4,7 @@ pr: none
 resources:
   pipelines:
   - pipeline: CI
-    source: RepoM.Build
+    source: structurizr-dsl-plantuml-direction-updater.Build
     trigger:
       tags:
       - auto-release
@@ -35,9 +35,9 @@ stages:
       displayName: ⚙️ Set up pipeline
 
     - download: CI
-      artifact: installer
-      displayName: 🔻 Download installer artifact
-      patterns: 'installer/*'
+      artifact: packages
+      displayName: 🔻 Download packages artifact
+      patterns: 'packages/*'
 
     - download: CI
       artifact: release-dependencies
@@ -55,7 +55,9 @@ stages:
         title: v$(resources.pipeline.CI.runName)
         isDraft: false 
         isPreRelease: $(IsPrerelease)
-        assets: $(Pipeline.Workspace)/CI/installer/*Setup.exe
+        assets: |
+          $(Pipeline.Workspace)/CI/packages/*.nupkg
+          $(Pipeline.Workspace)/CI/packages/*.snupkg
         changeLogCompareToRelease: lastNonDraftRelease
         changeLogType: issueBased
         changeLogLabels: |
@@ -69,3 +71,30 @@ stages:
         dotnet-releaser changelog --update --github-token $(GITHUB_TOKEN) $(Pipeline.Workspace)/CI/release-dependencies/dotnet-releaser.toml $(resources.pipeline.CI.runName)
       displayName: 📢 Update GitHub release using Releaser
       
+- stage: nuget_org
+  displayName: nuget.org
+  dependsOn: GitHubRelease
+  jobs:
+  - deployment: push
+    pool:
+      vmImage: ubuntu-latest
+    environment: No-Approval
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: CI
+            artifact: packages
+            displayName: Download nuget packages artifact
+            patterns: 'packages/*'
+          - task: NuGetToolInstaller@1
+            displayName: Use NuGet 5.x
+            inputs:
+              versionSpec: 5.x
+          - task: NuGetCommand@2
+            displayName: NuGet push nupkg
+            inputs:
+              command: push
+              packagesToPush: '$(Pipeline.Workspace)/**/*.nupkg;$(Pipeline.Workspace)/**/*.snupkg;!$(Pipeline.Workspace)/**/*.symbols.nupkg'
+              nuGetFeedType: external
+              publishFeedCredentials: nuget.org  

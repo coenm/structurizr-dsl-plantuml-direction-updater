@@ -112,17 +112,4 @@ stages:
               /p:ExcludeByAttribute=CompilerGenerated 
             publishTestResults: true
 
-        - task: DotNetCoreCLI@2
-          displayName: 🧪 Dotnet Test SystemTest
-          inputs:
-            command: test
-            projects: 'tests/**/SystemTests.csproj'
-            arguments: >-
-              --no-build --configuration $(buildConfiguration) 
-              -- --output Detailed 
-              --report-trx 
-              --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
-              --results-directory $(Agent.TempDirectory)
-            publishTestResults: true
-
         - template: Templates/publish-code-analysis.yaml
