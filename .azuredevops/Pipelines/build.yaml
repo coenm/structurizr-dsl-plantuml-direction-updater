@@ -127,17 +127,41 @@ stages:
 
         - template: Templates/publish-code-analysis.yaml
 
-        - task: DotNetCoreCLI@2
-          displayName: Dotnet Publish RepoM
-          inputs:
-            command: publish
-            arguments: "--configuration $(buildConfiguration) --output _output/Win/Assemblies"
-            projects: "**/RepoM.App.csproj"
-            publishWebProjects: false
-            modifyOutputPath: false
-            zipAfterPublish: false
+        # - task: DotNetCoreCLI@2
+        #   displayName: Dotnet Publish
+        #   inputs:
+        #     command: publish
+        #     arguments: "--configuration $(buildConfiguration)"
+        #     projects: "**/StructurizrDslPlantumlDirectionUpdater.csproj"
+        #     publishWebProjects: false
+        #     modifyOutputPath: false
+        #     zipAfterPublish: false
 
-        - template: Templates/create-installer.yaml
+        - task: DotNetCoreCLI@2
+          displayName: 'DotNet Pack'
+          inputs:
+            command: pack
+            configuration: $(BuildConfiguration) 
+            nobuild: false
+            includesymbols: true
+
+        - task: CopyFiles@2
+          displayName: "Copy files to artifact"
+          inputs:
+            SourceFolder: "$(Build.SourcesDirectory)"
+            Contents: |
+              **\bin\Release\*.s?nupkg
+            TargetFolder: "$(Build.ArtifactStagingDirectory)"
+            OverWrite: true
+
+        - task: PublishBuildArtifacts@1
+          displayName: 📢 Publish artifact
+          inputs:
+            PathtoPublish: "$(Build.ArtifactStagingDirectory)"
+            # PathtoPublish: "_output"
+            ArtifactName: nuget            
+
+        # - template: Templates/create-installer.yaml
 
         - template: Templates/publish-release-dependencies.yaml       
     
