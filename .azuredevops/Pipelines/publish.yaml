@@ -68,7 +68,7 @@ stages:
           ]
     - powershell: |
         dotnet tool install --global dotnet-releaser
-        dotnet-releaser changelog --update --github-token $(GITHUB_TOKEN) $(Pipeline.Workspace)/CI/release-dependencies/dotnet-releaser.toml $(resources.pipeline.CI.runName)
+        dotnet-releaser changelog --update --github-token $(GITHUB_TOKEN_NEW) $(Pipeline.Workspace)/CI/release-dependencies/dotnet-releaser.toml $(resources.pipeline.CI.runName)
       displayName: 📢 Update GitHub release using Releaser
       
 - stage: nuget_org
