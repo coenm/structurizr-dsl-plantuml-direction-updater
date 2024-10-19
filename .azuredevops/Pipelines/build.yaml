@@ -151,13 +151,13 @@ stages:
             SourceFolder: "$(Build.SourcesDirectory)"
             Contents: |
               **\bin\Release\*.s?nupkg
-            TargetFolder: "$(Build.ArtifactStagingDirectory)"
+            TargetFolder: "$(Build.ArtifactStagingDirectory)\nuget"
             OverWrite: true
 
         - task: PublishBuildArtifacts@1
           displayName: 📢 Publish artifact
           inputs:
-            PathtoPublish: "$(Build.ArtifactStagingDirectory)"
+            PathtoPublish: "$(Build.ArtifactStagingDirectory)\nuget"
             # PathtoPublish: "_output"
             ArtifactName: nuget            
 
