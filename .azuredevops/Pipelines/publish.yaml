@@ -1,0 +1,71 @@
+trigger: none # We only want to trigger manually or based on resources
+pr: none
+
+resources:
+  pipelines:
+  - pipeline: CI
+    source: RepoM.Build
+    trigger:
+      tags:
+      - auto-release
+
+variables:
+- group: Publishing secrets
+
+stages:
+- stage: GithubRelease
+  displayName: Github Release
+  jobs:
+
+  - job: Release
+    displayName: Github Release
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+
+    - checkout: none
+
+    - powershell: |
+        Write-Host "##vso[build.updatebuildnumber]$(resources.pipeline.CI.runName)"
+        if ('$(resources.pipeline.CI.runName)'.Contains('-')) {
+          Write-Host "##vso[task.setvariable variable=IsPrerelease]true"
+        } else {
+          Write-Host "##vso[task.setvariable variable=IsPrerelease]false"
+        }
+      displayName: ⚙️ Set up pipeline
+
+    - download: CI
+      artifact: installer
+      displayName: 🔻 Download installer artifact
+      patterns: 'installer/*'
+
+    - download: CI
+      artifact: release-dependencies
+      displayName: 🔻 Download publisher artifact
+      patterns: 'release-dependencies/*'
+
+    - task: GitHubRelease@1
+      displayName: 📢 Create GitHub release
+      inputs:
+        gitHubConnection: github_coenm_pan
+        repositoryName: $(Build.Repository.Name)
+        target: $(resources.pipeline.CI.sourceCommit)
+        tagSource: userSpecifiedTag
+        tag: v$(resources.pipeline.CI.runName)
+        title: v$(resources.pipeline.CI.runName)
+        isDraft: false 
+        isPreRelease: $(IsPrerelease)
+        assets: $(Pipeline.Workspace)/CI/installer/*Setup.exe
+        changeLogCompareToRelease: lastNonDraftRelease
+        changeLogType: issueBased
+        changeLogLabels: |
+          [
+            { "label" : "breaking change", "displayName" : "Breaking changes", "state" : "closed" },
+            { "label" : "bug", "displayName" : "Fixes", "state" : "closed" },
+            { "label" : "enhancement", "displayName": "Enhancements", "state" : "closed" }
+          ]
+    - powershell: |
+        dotnet tool install --global dotnet-releaser
+        dotnet-releaser changelog --update --github-token $(GITHUB_TOKEN) $(Pipeline.Workspace)/CI/release-dependencies/dotnet-releaser.toml $(resources.pipeline.CI.runName)
+      displayName: 📢 Update GitHub release using Releaser
+      

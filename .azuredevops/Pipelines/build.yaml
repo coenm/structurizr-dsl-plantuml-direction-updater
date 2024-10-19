@@ -1,0 +1,143 @@
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/process/expressions?view=azure-devops#variables
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/process/variables?view=azure-devops&tabs=yaml%2Cbatch#share-variables-across-pipelines
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - main
+    - develop
+    - release/*
+  paths:
+    exclude:
+    - docs/
+    - '*.md'
+    - .vscode/
+
+pr: none
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+  - stage: "Build"
+    displayName: "Build"
+    jobs:
+      - job: "Build"
+        displayName: "Artifact build"
+        variables:
+          - name: DOTNET_CLI_TELEMETRY_OPTOUT
+            value: 1
+          - name: DOTNET_SKIP_FIRST_TIME_EXPERIENCE
+            value: 1
+          - name: BuildConfiguration
+            value: Release
+          - name: ci_feed
+            value: 39ce9363-a308-4580-8610-ee11f4953539/01001223-8651-4b73-a7ca-ba27c3e10a3c
+          - name: COVERLET_EXCLUDE_ATTRIBUTE
+            value: 'DebuggerNonUserCodeAttribute%2cExcludeFromCodeCoverageAttribute%2cGeneratedCodeAttribute%2cCompilerGeneratedAttribute'
+ 
+        steps:
+
+        - checkout: self
+          fetchDepth: 0 # avoid shallow clone so nbgv can do its work.
+          clean: true
+
+        - script: git submodule update --init --recursive
+          displayName: 🔄 Update git submodules
+
+        - template: Templates/dotnet-sdk-install.yaml
+      
+        - task: NuGetToolInstaller@1
+          displayName: ⬇️ Install Nuget 5x
+          inputs:
+            versionSpec: '5.*'
+            checkLatest: true
+
+        - pwsh: |
+            dotnet tool install --tool-path . nbgv
+            ./nbgv cloud -a
+          displayName: 4️⃣2️⃣ Set build number
+          name: Nbgv
+
+        - task: PowerShell@2
+          displayName: Publish Nerdbank variables
+          name: VariableExport
+          inputs:
+            targetType: 'inline'
+            script: |
+              $var = (gci env:NBGV*).GetEnumerator() | Sort-Object Name
+              $out = ""
+              Foreach ($v in $var) {$out = $out + "##vso[task.setvariable variable={0};isOutput=true]{1}`n" -f $v.Name, $v.Value}
+              write-output $out
+            errorActionPreference: 'silentlyContinue'
+            ignoreLASTEXITCODE: true
+
+        - task: PowerShell@2
+          displayName: Export variables
+          inputs:
+            targetType: 'inline'
+            script: |
+              $var = (gci env:*).GetEnumerator() | Sort-Object Name
+              $out = ""
+              Foreach ($v in $var) {$out = $out + "`t{0,-28} = {1,-28}`n" -f $v.Name, $v.Value}
+              $fileName = (Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY "EnvironmentVariables.md")
+              write-output "Dump variables on $fileName"
+              set-content $fileName $out
+              write-output "##vso[task.addattachment type=Distributedtask.Core.Summary;name=Environment Variables;]$fileName"
+            errorActionPreference: 'silentlyContinue'
+            ignoreLASTEXITCODE: true
+
+        # # regenerate markdowns without links (in order to generate markdown to be included in nuget package)
+        # - pwsh: |
+        #     dotnet tool install --tool-path . MarkdownSnippets.Tool
+        #     ./mdsnippets --omit-snippet-links true
+        #   displayName: Re-generate markdown without links
+        #   name: mdsnippets
+
+        - task: DotNetCoreCLI@2
+          displayName: 🛠️ DotNet Restore
+          inputs:
+            command: restore
+            projects: '**/*.csproj'
+
+        - template: Templates/prepare-code-analysis.yaml
+
+        - task: DotNetCoreCLI@2
+          displayName: 🛠️ DotNet Build
+          inputs:
+            command: build
+            projects: '**/*.sln'
+            arguments: '--configuration $(BuildConfiguration)'
+
+         # https://docs.microsoft.com/en-us/azure/devops/pipelines/ecosystems/dotnet-core?view=azure-devops&tabs=dotnetfive
+        - task: DotNetCoreCLI@2
+          displayName: 🧪 Dotnet Test
+          inputs:
+            command: test
+            projects: 'tests/**/*.Tests.csproj'
+            arguments: >-
+              --no-build --configuration $(buildConfiguration) 
+              --collect:"XPlat Code Coverage;Format=cobertura,opencover" 
+              --logger trx 
+              /p:ExcludeByAttribute=CompilerGenerated 
+            publishTestResults: true
+
+        - template: Templates/publish-code-analysis.yaml
+
+        - task: DotNetCoreCLI@2
+          displayName: Dotnet Publish RepoM
+          inputs:
+            command: publish
+            arguments: "--configuration $(buildConfiguration) --output _output/Win/Assemblies"
+            projects: "**/RepoM.App.csproj"
+            publishWebProjects: false
+            modifyOutputPath: false
+            zipAfterPublish: false
+
+        - template: Templates/create-installer.yaml
+
+        - template: Templates/publish-release-dependencies.yaml       
+    

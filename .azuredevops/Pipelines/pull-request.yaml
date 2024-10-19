@@ -1,0 +1,128 @@
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/process/expressions?view=azure-devops#variables
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/process/variables?view=azure-devops&tabs=yaml%2Cbatch#share-variables-across-pipelines
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml
+
+trigger: none
+
+pr:
+  - main
+  - release/*
+  - feature/*
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+  - stage: "Build"
+    displayName: "Artifact build"
+    jobs:
+      - job: "Build"
+        displayName: "Artifact build"
+        variables:
+          - name: DOTNET_CLI_TELEMETRY_OPTOUT
+            value: 1
+          - name: DOTNET_SKIP_FIRST_TIME_EXPERIENCE
+            value: 1
+          - name: BuildConfiguration
+            value: Release
+
+        steps:
+        - checkout: self
+          fetchDepth: 0 # avoid shallow clone so nbgv can do its work.
+          clean: true
+
+        - script: git submodule update --init --recursive
+          displayName: 🔄 Update git submodules
+
+        - template: Templates/dotnet-sdk-install.yaml        
+
+        - task: PowerShell@2
+          displayName: 🤖 Export variables
+          inputs:
+            targetType: 'inline'
+            script: |
+              $var = (gci env:*).GetEnumerator() | Sort-Object Name
+              $out = ""
+              Foreach ($v in $var) {$out = $out + "`t{0,-28} = {1,-28}`n" -f $v.Name, $v.Value}
+              $fileName = (Join-Path $env:BUILD_ARTIFACTSTAGINGDIRECTORY "EnvironmentVariables.md")
+              write-output "Dump variables on $fileName"
+              set-content $fileName $out
+              write-output "##vso[task.addattachment type=Distributedtask.Core.Summary;name=Environment Variables;]$fileName"
+            errorActionPreference: 'silentlyContinue'
+            ignoreLASTEXITCODE: true
+
+        - task: NuGetToolInstaller@1
+          displayName: ⬇️ Install Nuget 5x
+          inputs:
+            versionSpec: '5.*'
+            checkLatest: true
+
+        - pwsh: |
+            dotnet tool install --global --version 27.0.2 MarkdownSnippets.Tool 
+            mdsnippets 
+            
+            $changedLines = git status --porcelain=v1
+            $changedFileCount = $changedLines | wc -l
+            
+            if ($changedFileCount -gt 0) {
+              Write-Host "The following $changedFileCount file(s) are not up to date:"
+              $lines = $changedLines -split "`n"
+              foreach ($line in $lines) {
+                Write-Host " - $line"
+              }
+
+              Write-Error "There are local changes in the git repository meaning not all markdown snippets are up to date."
+              exit 1
+            }
+          displayName: 📄 Verify markdown snippets
+          name: mdsnippets
+          failOnStderr: true
+
+        - pwsh: |
+            dotnet tool install --tool-path . nbgv
+            ./nbgv cloud -a
+          displayName: 4️⃣2️⃣ Set build number
+          name: Nbgv
+
+        - task: DotNetCoreCLI@2
+          displayName: 🛠️ DotNet Restore
+          inputs:
+            command: restore
+            projects: '**/*.csproj'
+
+        - template: Templates/prepare-code-analysis.yaml
+
+        - task: DotNetCoreCLI@2
+          displayName: 🛠️ DotNet Build
+          inputs:
+            command: build
+            projects: '**/*.sln'
+            arguments: '--configuration $(BuildConfiguration)'
+
+        - task: DotNetCoreCLI@2
+          displayName: 🧪 Dotnet Test
+          inputs:
+            command: test
+            projects: 'tests/**/*.Tests.csproj'
+            arguments: >-
+              --no-build --configuration $(buildConfiguration) 
+              --collect:"XPlat Code Coverage;Format=cobertura,opencover" 
+              --logger trx 
+              /p:ExcludeByAttribute=CompilerGenerated 
+            publishTestResults: true
+
+        - task: DotNetCoreCLI@2
+          displayName: 🧪 Dotnet Test SystemTest
+          inputs:
+            command: test
+            projects: 'tests/**/SystemTests.csproj'
+            arguments: >-
+              --no-build --configuration $(buildConfiguration) 
+              -- --output Detailed 
+              --report-trx 
+              --coverage --coverage-output coverage.cobertura.xml --coverage-output-format cobertura
+              --results-directory $(Agent.TempDirectory)
+            publishTestResults: true
+
+        - template: Templates/publish-code-analysis.yaml
